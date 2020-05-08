@@ -18,6 +18,8 @@ SWAP_HANDS_ENABLE = no      # Enable one-hand typing
 
 VIA_ENABLE = yes            # Enable VIA support
 
+LINK_TIME_OPTIMIZATION_ENABLE = yes  # Reduce size of firmware by optimizing at link time
+
 # Do not enable SLEEP_LED_ENABLE. it uses the same timer as BACKLIGHT_ENABLE
 SLEEP_LED_ENABLE = no    # Breathing sleep LED during USB suspend
 
