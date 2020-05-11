@@ -15,9 +15,15 @@ uint8_t volatile serial_slave_buffer[SERIAL_SLAVE_BUFFER_LENGTH] = {0};
 uint8_t volatile serial_master_buffer[SERIAL_MASTER_BUFFER_LENGTH] = {0};
 uint8_t volatile status_com = 0;
 uint8_t volatile status1 = 0;
+uint8_t volatile status2 = 0;
 uint8_t slave_buffer_change_count = 0;
 uint8_t s_change_old = 0xff;
 uint8_t s_change_new = 0xff;
+
+#ifdef CONTROLLABLE_OLEDS
+uint8_t hid_message[32] = {0};
+bool hid_message_pending = false;
+#endif
 
 SSTD_t transactions[] = {
 #define GET_SLAVE_STATUS 0
@@ -38,6 +44,14 @@ SSTD_t transactions[] = {
       0, NULL,
       sizeof(serial_slave_buffer), (uint8_t *)serial_slave_buffer
     }
+#ifdef CONTROLLABLE_OLEDS
+#define PUT_SLAVE_HID 3
+    /* transfer HID data to the slave */
+    ,{ (uint8_t *)&status2,
+      sizeof(hid_message), (uint8_t *)hid_message,
+      0, NULL
+    }
+#endif
 };
 
 void serial_master_init(void)
@@ -72,6 +86,14 @@ int serial_update_buffers(int master_update)
         // serial_slave_buffer dosen't change
         smatstatus = TRANSACTION_END; // dummy status
     }
+
+#ifdef CONTROLLABLE_OLEDS
+    if( hid_message_pending) {
+      // Push message to the slave.
+      soft_serial_transaction(PUT_SLAVE_HID);
+      hid_message_pending = false;
+    }
+#endif
 
     if( !master_update && !need_retry) {
         status = soft_serial_transaction(GET_SLAVE_STATUS);
