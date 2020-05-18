@@ -187,9 +187,6 @@ const char *read_logo(void);
  * oled_result_id, and following bytes depend on the type of the command, but
  * generally it should be the same that was sent in.
  *
- * Note: Currently, the very last character on the OLED screen cannot be set,
- * since it would cause the text to scroll up and for the first line to
- * disappear.
  * Note: The raw HID protocol can only support frames of 32 bytes, and minus
  * the necessary header, it means that 27 characters are currently the maximum
  * number of characters that can be written per line. The SSD1306 OLED supports
@@ -242,9 +239,9 @@ enum oled_result_id {
 #define SCREEN_BUFFER_LENGTH (MatrixCols * MatrixRows)
 
 // The current text shown on the screen (front buffer).
-static char current_screen[SCREEN_BUFFER_LENGTH] = {0};
+static char current_screen[SCREEN_BUFFER_LENGTH + 1] = {0};
 // The back buffer containing the text to show when presenting.
-static char screen_buffer[SCREEN_BUFFER_LENGTH] = {0};
+static char screen_buffer[SCREEN_BUFFER_LENGTH + 1] = {0};
 // Whether the screen buffer contains variables.
 static bool screen_has_variable = false;
 
