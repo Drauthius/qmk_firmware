@@ -212,17 +212,6 @@ void matrix_write_char_inner(struct CharacterMatrix *matrix, uint8_t c) {
 void matrix_write_char(struct CharacterMatrix *matrix, uint8_t c) {
   matrix->dirty = true;
 
-  if (c == '\n') {
-    // Clear to end of line from the cursor and then move to the
-    // start of the next line
-    uint8_t cursor_col = (matrix->cursor - &matrix->display[0][0]) % MatrixCols;
-
-    while (cursor_col++ < MatrixCols) {
-      matrix_write_char_inner(matrix, ' ');
-    }
-    return;
-  }
-
   matrix_write_char_inner(matrix, c);
 }
 
@@ -239,9 +228,15 @@ void matrix_write(struct CharacterMatrix *matrix, const char *data) {
 }
 
 void matrix_write_ln(struct CharacterMatrix *matrix, const char *data) {
-  char data_ln[strlen(data)+2];
-  snprintf(data_ln, sizeof(data_ln), "%s\n", data);
-  matrix_write(matrix, data_ln);
+  matrix_write(matrix, data);
+
+  // Clear to end of line from the cursor and then move to the
+  // start of the next line
+  uint8_t cursor_col = (matrix->cursor - &matrix->display[0][0]) % MatrixCols;
+
+  while (cursor_col++ < MatrixCols) {
+    matrix_write_char_inner(matrix, ' ');
+  }
 }
 
 void iota_gfx_write(const char *data) {

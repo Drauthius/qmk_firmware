@@ -208,8 +208,7 @@ const char *read_logo(void);
  *   Set the content of a line/row of the screen. The fifth byte should be which
  *   line to modify, and the sixth byte and onwards should be content that is
  *   desired on that line. Will replace everything on that line, and will not
- *   wrap to the next one (unless the newline character was specified, which is
- *   not recommended).
+ *   wrap to the next one.
  *
  * id_present:
  *   Show the changes to the screen. This has to be called after the desired
