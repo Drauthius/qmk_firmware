@@ -13,6 +13,7 @@
     #endif
     #include "raw_hid.h"
     #include "split_scomm.h"
+    #include "via.h"
   #endif
 #endif
 
@@ -35,6 +36,15 @@ enum custom_keycodes {
   LOWER,
   RAISE,
   ADJUST,
+#ifdef CONTROLLABLE_OLEDS
+  // VIA-defined keycodes, which can be added to the keymap below, or mapped in VIA.
+  SET_MASTER_TAG = USER00,
+  INC_MASTER_TAG = USER01,
+  DEC_MASTER_TAG = USER02,
+  SET_SLAVE_TAG = USER03,
+  INC_SLAVE_TAG = USER04,
+  DEC_SLAVE_TAG = USER05,
+#endif
 };
 
 
@@ -172,29 +182,72 @@ const char *read_logo(void);
  * Add "EXTRAFLAGS += -DCONTROLLABLE_OLEDS" to your rules.mk to build the
  * support needed to send commands from the operating system to the firmware.
  *
- * The commands should follow a certain pattern to be recognised and properly
- * processed. The first two bytes should be 0x02 and 0x00 respectively, used to
- * bypass VIA if it is enabled. The third byte is a command found in
+ * Data sent to and from the firmware contains a four-byte header, necessary to
+ * bypass VIA if it is enabled, and to handle different commands and screens.
+ * This header is necessary and needs to be correct for the commands to be
+ * recognised and properly processed. The first two bytes should be 0x02 and
+ * 0x00 respectively, used to bypass VIA.  The third byte is a command found in
  * oled_command_id, and the fourth byte is one of the screens in
  * oled_screen_id.
  * For example: 0x02 0x00 0x01 0x00 means that the master screen should be
  * cleared.
+ *
+ * Commands (sent to firmware):
+ * - Byte 1: 0x02
+ * - Byte 2: 0x00
+ * - Byte 3: oled_command_id
+ * - Byte 4: oled_screen_id
+ * - Byte ...: Depends on command; see below.
+ *
  * Commands should be sent with a short delay in between, e.g. 10 milliseconds,
  * especially when controlling the slave screen, or some commands might get
  * lost.
  *
- * For the response, the first byte contains the result code as seen in
- * oled_result_id, and following bytes depend on the type of the command, but
- * generally it should be the same that was sent in.
+ * For messages sent by the firmware, the first byte contains a result code in
+ * oled_result_id, the second byte whether the message is a response to a
+ * command or an event triggered by a keycode as oled_message_id, the third
+ * byte is the command the response is for (oled_command_id), or the event
+ * (oled_event_id). The following bytes depend on the type of the response or
+ * event. For responses, generally the same thing is sent back as was passed
+ * in. See the documentation below.
+ *
+ * Response (sent from firmware):
+ * - Byte 1: oled_result_id
+ * - Byte 2: 0x00
+ * - Byte 3: oled_command_id
+ * - Byte 4: oled_screen_id
+ * - Byte ...: Depends on response; see below.
+ *
+ * Event (sent from firmware):
+ * - Byte 1: 0x00
+ * - Byte 2: 0x01
+ * - Byte 3: oled_event_id
+ * - Byte 4: oled_screen_id
+ * - Byte ...: Depends on event; see below.
  *
  * Note: The raw HID protocol can only support frames of 32 bytes, and minus
- * the necessary header, it means that 27 characters are currently the maximum
+ * the necessary header, it means that 28 characters are currently the maximum
  * number of characters that can be written per line. The SSD1306 OLED supports
  * 21 characters per line.
  */
 
+// Result codes for the commands.
+// First byte in messages from the firmware.
+enum oled_result_id {
+  id_success = 0x00,
+  id_failure = 0x01
+};
+
+// Type of a message sent from the firmware
+// Second byte in messages from the firmware.
+enum oled_message_id {
+  id_response = 0x00,
+  id_event = 0x01
+};
+
 /*
  * The commands that are recognised to control the OLEDs.
+ * Third byte in messages to and from the firmware.
  * id_set_up:
  *   This is equivalent to clear, but also returns the number of characters
  *   that can be written to the screen in the fifth and sixth byte of the
@@ -222,16 +275,34 @@ enum oled_command_id {
   id_present = 0x03
 };
 
+/*
+ * The events that the firmware might send, triggered by certain keycodes
+ * (see custom_keycodes above).
+ * They are the third byte in messages sent from the firmware.
+ * id_event_set_tag:
+ *   A specific tag is requested to be shown on a specific screen. The fourth
+ *   byte is the screen (oled_screen_id below), and the fifth is the tag ID.
+ *   Note that KC_1 => tag ID 1.
+ *
+ * id_event_increment_tag:
+ *   Go to the next tag for a specific screen. The fourth byte is the screen
+ *   (oled_screen_id below).
+ *
+ * id_event_decrement_tag:
+ *   Go to the previous tag for a specific screen. The fourth byte is the
+ *   screen (oled_screen_id below).
+ */
+enum oled_event_id {
+  id_event_set_tag = 0x00,
+  id_event_increment_tag = 0x01,
+  id_event_decrement_tag = 0x02
+};
+
 // Which OLED screen to control.
+// Typically the fourth byte in messages to and from the firmware.
 enum oled_screen_id {
   id_master = 0x00,
   id_slave  = 0x01
-};
-
-// Result codes for the commands.
-enum oled_result_id {
-  id_success = 0x00,
-  id_failure = 0x01
 };
 
 // The size of the screen buffer.
@@ -251,14 +322,17 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
 #else
 void raw_hid_receive(uint8_t *data, uint8_t length) {
 #endif
-  if(!data || length < 1)
+  if(!data || length < 2)
     return;
 
+  // First two bytes in the header are sent for VIA compatibility, and used
+  // as the result code and message type for the response.
   enum oled_result_id *result = &data[0];
   *result = id_failure;
+  enum oled_message_id *message = &data[1];
+  *message = id_response;
 
   if (length > 3) {
-    // First two bytes in the header are unused (sent for VIA compatibility).
     // The next two bytes are the command and screen, followed by any data.
     uint8_t command_id = data[2];
     enum oled_screen_id screen = data[3];
@@ -316,6 +390,19 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 #endif
 }
 
+// Byte to keep track of two-step tag selection on a certain screen.
+static uint8_t processing_screen_command = 0xFF;
+// Buffer used when sending HID events.
+static uint8_t hid_event_buffer[32] = {0};
+// Send an event over HID raw.
+static void send_hid_event(uint8_t event, uint8_t *args, uint8_t len) {
+  hid_event_buffer[0] = id_success;
+  hid_event_buffer[1] = id_event;
+  hid_event_buffer[2] = event;
+  memcpy(&hid_event_buffer[3], args, MIN(len, sizeof(hid_event_buffer) - 4));
+  raw_hid_send(hid_event_buffer, sizeof(hid_event_buffer));
+}
+
 // Buffer for substituting variables with text.
 static char var_buffer[MatrixCols];
 /**
@@ -328,7 +415,7 @@ static char var_buffer[MatrixCols];
  * Current handled variables:
  *   %l  -  The layer name
  */
-void write_screen(struct CharacterMatrix *matrix) {
+static void write_screen(struct CharacterMatrix *matrix) {
   if (!screen_has_variable) {
     matrix_write(matrix, current_screen);
   } else {
@@ -486,6 +573,54 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         }
         return false;
         break;
+#ifdef CONTROLLABLE_OLEDS
+    // Two-step tag selection. First part is to invoke the selection keycode.
+    case SET_MASTER_TAG:
+    case SET_SLAVE_TAG:
+        processing_screen_command = (keycode == SET_MASTER_TAG) ? id_master : id_slave;
+        return false;
+        break;
+    // Keys to increase or decrease the tag on a certain screen.
+    case INC_MASTER_TAG:
+    case DEC_MASTER_TAG:
+    case INC_SLAVE_TAG:
+    case DEC_SLAVE_TAG:
+        if (record->event.pressed) {
+          uint8_t screen = (keycode == INC_MASTER_TAG || keycode == DEC_MASTER_TAG) ? id_master : id_slave;
+          uint8_t event = (keycode == INC_MASTER_TAG || keycode == INC_SLAVE_TAG) ? id_event_increment_tag : id_event_decrement_tag;
+          send_hid_event(event, &screen, 1);
+        }
+        return false;
+        break;
+#endif
   }
+
+#ifdef CONTROLLABLE_OLEDS
+  // Two-step tag selection. Second part is to get a numerical button press.
+  // The number will not be printed out. If a non-numerical button is pressed,
+  // it will be printed out and the tag selection will stop.
+  if (processing_screen_command != 0xFF && record->event.pressed) {
+    uint8_t screen = processing_screen_command;
+    uint8_t tag = 0xFF;
+    processing_screen_command = 0xFF;
+
+    switch (keycode) {
+      case KC_1 ... KC_9:
+        tag = (keycode - KC_1) + 1;
+        break;
+      case KC_0:
+        tag = 0;
+        break;
+    }
+    if (tag != 0xFF) {
+      uint8_t args[] = { screen, tag };
+      send_hid_event(id_event_set_tag, args, sizeof(args));
+      return false;
+    }
+  }
+#endif
+
   return true;
 }
+
+// vim: et:ts=2:sw=2:sts=2
