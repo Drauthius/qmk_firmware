@@ -29,6 +29,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // #define EE_HANDS
 
 #define SSD1306OLED
+#undef OLED_FONT_H
+#define OLED_FONT_H "keyboards/lily58/keymaps/albhen/glcdfont.c"
 
 #define USE_SERIAL_PD2
 

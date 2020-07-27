@@ -4,27 +4,19 @@
   #include "lufa.h"
   #include "split_util.h"
 #endif
-#ifdef SSD1306OLED
-  #include "ssd1306.h"
-
-  #ifdef CONTROLLABLE_OLEDS
-    #ifndef RAW_ENABLE
-      #error "RAW_ENABLE must be set"
-    #endif
-    #include "raw_hid.h"
-    #include "split_scomm.h"
-    #include "via.h"
+#if defined(OLED_DRIVER_ENABLE) && defined(CONTROLLABLE_OLEDS)
+  #ifndef RAW_ENABLE
+    #error "RAW_ENABLE must be set"
   #endif
+  #include "raw_hid.h"
+  #include "oledctrl.h"
+  #include "via.h"
 #endif
-
-
 
 #ifdef RGBLIGHT_ENABLE
 //Following line allows macro to read current RGB settings
 extern rgblight_config_t rgblight_config;
 #endif
-
-extern uint8_t is_master;
 
 #define _QWERTY 0
 #define _LOWER 1
@@ -153,16 +145,18 @@ void matrix_init_user(void) {
     #ifdef RGBLIGHT_ENABLE
       RGB_current_mode = rgblight_config.mode;
     #endif
-    //SSD1306 OLED init, make sure to add #define SSD1306OLED in config.h
-    #ifdef SSD1306OLED
-        iota_gfx_init(false);   // turns on the display
-    #endif
 }
 
-//SSD1306 OLED update loop, make sure to add #define SSD1306OLED in config.h
-#ifdef SSD1306OLED
+//SSD1306 OLED update loop, make sure to enable OLED_DRIVER_ENABLE=yes in rules.mk
+#ifdef OLED_DRIVER_ENABLE
 
-// When add source files to SRC in rules.mk, you can use functions.
+oled_rotation_t oled_init_user(oled_rotation_t rotation) {
+  //if (!is_keyboard_master())
+    //return OLED_ROTATION_180;  // flips the display 180 degrees if offhand
+  return rotation;
+}
+
+// When you add source files to SRC in rules.mk, you can use functions.
 const char *read_layer_state(void);
 const char *read_logo(void);
 //void set_keylog(uint16_t keycode, keyrecord_t *record);
@@ -254,7 +248,7 @@ enum oled_message_id {
  *   response (columns and rows, respectively).
  *
  * id_clear:
- *   Clear the entire screen. Depending on how matrix_update() looks, this might
+ *   Clear the entire screen. Depending on how oled_task_user() looks, this might
  *   revert the screen to its "default" (uncontrolled) state.
  *
  * id_set_line:
@@ -306,7 +300,7 @@ enum oled_screen_id {
 };
 
 // The size of the screen buffer.
-#define SCREEN_BUFFER_LENGTH (MatrixCols * MatrixRows)
+#define SCREEN_BUFFER_LENGTH ((OLED_DISPLAY_WIDTH / OLED_FONT_WIDTH) * (OLED_DISPLAY_HEIGHT / OLED_FONT_HEIGHT))
 
 // The current text shown on the screen (front buffer).
 static char current_screen[SCREEN_BUFFER_LENGTH + 1] = {0};
@@ -339,34 +333,34 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
     uint8_t *command_data = &data[4];
     uint8_t command_length = length - 5;
 
-    if (screen == id_slave && is_master) {
+    if (screen == id_slave && is_keyboard_master()) {
       // Command for the slave, send it over the serial.
-      memcpy(hid_message, data, MIN(sizeof(hid_message), length));
-      hid_message_pending = true;
+      oledctrl_send_msg(data, length);
       *result = id_success;
     }
-    else if (screen == id_master || (screen == id_slave && !is_master)) {
+    else if (screen == id_master || (screen == id_slave && !is_keyboard_master())) {
       switch (command_id) {
         case id_set_up: // Return the size of the screen.
-          command_data[0] = MatrixCols;
-          command_data[1] = MatrixRows;
+          command_data[0] = oled_max_chars();
+          command_data[1] = oled_max_lines();
           // Fall through
-        case id_clear: // Clear the buffers
+        case id_clear: // Clear the buffers and screens
           memset(current_screen, 0, sizeof(current_screen));
           memset(screen_buffer, ' ', sizeof(screen_buffer));
+          oled_clear();
           *result = id_success;
           break;
         case id_set_line: { // Set a line of text.
           uint8_t line = command_data[0];
           char *text = (char*)&command_data[1];
-          if (line >= MatrixRows) // Line out of bounds
+          if (line >= oled_max_lines()) // Line out of bounds
             break;
 
-          uint8_t len = MIN(strnlen(text, command_length), MatrixCols);
-          memcpy(&screen_buffer[line * MatrixCols], text, len);
-          if (len < MatrixCols) {
+          uint8_t len = MIN(strnlen(text, command_length), oled_max_chars());
+          memcpy(&screen_buffer[line * oled_max_chars()], text, len);
+          if (len < oled_max_chars()) {
             // Erase everything else until the end of the line.
-            memset(&screen_buffer[line * MatrixCols + len], ' ', MatrixCols - len);
+            memset(&screen_buffer[line * oled_max_chars() + len], ' ', oled_max_chars() - len);
           }
           *result = id_success;
           break;
@@ -381,12 +375,21 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
     }
   }
 
-  if (!is_master)
+  if (!is_keyboard_master())
     return; // Slave cannot answer to HID messages
 
 #ifndef VIA_ENABLE
   // VIA module will always do this, so might as well replicate it here.
   raw_hid_send(data, length);
+#endif
+}
+
+// Process any message from the master.
+void oledctrl_receive_msg(uint8_t *msg, uint8_t len) {
+#ifdef VIA_ENABLE
+  raw_hid_receive_kb(msg, len);
+#else
+  raw_hid_receive(msg, len);
 #endif
 }
 
@@ -404,7 +407,7 @@ static void send_hid_event(uint8_t event, uint8_t *args, uint8_t len) {
 }
 
 // Buffer for substituting variables with text.
-static char var_buffer[MatrixCols];
+static char var_buffer[OLED_DISPLAY_WIDTH / OLED_FONT_WIDTH];
 /**
  * Write the front buffer to the OLED screen.
  * This method supports some simple substitutions of variables inside the
@@ -415,13 +418,13 @@ static char var_buffer[MatrixCols];
  * Current handled variables:
  *   %l  -  The layer name
  */
-static void write_screen(struct CharacterMatrix *matrix) {
+static void write_screen(void) {
   if (!screen_has_variable) {
-    matrix_write(matrix, current_screen);
+    oled_write(current_screen, false);
   } else {
     // A bit convoluted, but it works.
-    for (int row = 0; row < MatrixRows; ++row) {
-      for (int col = 0, i = row * MatrixCols; col < MatrixCols; ++col, ++i) {
+    for (int row = 0; row < oled_max_lines(); ++row) {
+      for (int col = 0, i = row * oled_max_chars(); col < oled_max_chars(); ++col, ++i) {
         // Don't write the final null character, or the first line will disappear.
         if (current_screen[i] == 0) {
           break;
@@ -454,9 +457,9 @@ static void write_screen(struct CharacterMatrix *matrix) {
           if (len > 0) {
             // A substitution occurred. The content of the var_buffer will
             // either be printed in full, or until the end of the line.
-            len = MIN(MIN(len, MatrixCols - col), sizeof(var_buffer) - 1);
+            len = MIN(MIN(len, oled_max_chars() - col), sizeof(var_buffer) - 1);
             var_buffer[len] = 0; // Chop if off if necessary.
-            matrix_write(matrix, var_buffer);
+            oled_write(var_buffer, false);
             col += len - 1; // Will be incremented once more by the loop.
             ++i; // Skip the variable character.
             continue;
@@ -464,7 +467,7 @@ static void write_screen(struct CharacterMatrix *matrix) {
         }
 
         // Write the character normally to the screen.
-        matrix_write_char(matrix, current_screen[i]);
+        oled_write_char(current_screen[i], false);
       }
     }
   }
@@ -472,67 +475,40 @@ static void write_screen(struct CharacterMatrix *matrix) {
 
 #endif // CONTROLLABLE_OLEDS
 
-void matrix_scan_user(void) {
-   iota_gfx_task();
-}
-
-void matrix_render_user(struct CharacterMatrix *matrix) {
-  if (is_master) {
+void oled_task_user(void) {
+  if (is_keyboard_master()) {
 #ifdef CONTROLLABLE_OLEDS
     // If the screen has been filled by the operating system, then use that,
     // otherwise revert to the default.
     if (current_screen[0] != 0) {
-      write_screen(matrix);
+      write_screen();
       return;
     }
 #endif // CONTROLLABLE_OLEDS
     // If you want to change the display of OLED, you need to change here
-    matrix_write_ln(matrix, read_layer_state());
-    //matrix_write_ln(matrix, read_keylog());
-    //matrix_write_ln(matrix, read_keylogs());
-    //matrix_write_ln(matrix, read_mode_icon(keymap_config.swap_lalt_lgui));
-    //matrix_write_ln(matrix, read_host_led_state());
-    //matrix_write_ln(matrix, read_timelog());
+    oled_write_ln(read_layer_state(), false);
+    //oled_write_ln(read_keylog(), false);
+    //oled_write_ln(read_keylogs(), false);
+    //oled_write_ln(read_mode_icon(keymap_config.swap_lalt_lgui), false);
+    //oled_write_ln(read_host_led_state(), false);
+    //oled_write_ln(read_timelog(), false);
   } else {
 #ifdef CONTROLLABLE_OLEDS
-    // Process any message from the master.
-    if (hid_message[0] != 0) {
-#ifdef VIA_ENABLE
-      raw_hid_receive_kb(hid_message, sizeof(hid_message));
-#else
-      raw_hid_receive(hid_message, sizeof(hid_message));
-#endif
-      memset(hid_message, 0, sizeof(hid_message));
-    }
     // If the screen has been filled by the operating system, then use that,
     // otherwise revert to the default.
     if (current_screen[0] != 0) {
-      write_screen(matrix);
+      write_screen();
       return;
     }
 #endif
-    matrix_write(matrix, read_logo());
+    oled_write(read_logo(), false);
   }
 }
-
-void matrix_update(struct CharacterMatrix *dest, const struct CharacterMatrix *source) {
-  if (memcmp(dest->display, source->display, sizeof(dest->display))) {
-    memcpy(dest->display, source->display, sizeof(dest->display));
-    dest->dirty = true;
-  }
-}
-
-void iota_gfx_task_user(void) {
-  struct CharacterMatrix matrix;
-  matrix_clear(&matrix);
-  matrix_render_user(&matrix);
-  matrix_update(&display, &matrix);
-}
-#endif//SSD1306OLED
+#endif // OLED_DRIVER_ENABLE
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
   if (record->event.pressed) {
-#ifdef SSD1306OLED
+#ifdef OLED_DRIVER_ENABLE
     //set_keylog(keycode, record);
 #endif
     // set_timelog();
