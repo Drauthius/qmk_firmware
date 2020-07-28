@@ -4,11 +4,7 @@
   #include "lufa.h"
   #include "split_util.h"
 #endif
-#if defined(OLED_DRIVER_ENABLE) && defined(CONTROLLABLE_OLEDS)
-  #ifndef RAW_ENABLE
-    #error "RAW_ENABLE must be set"
-  #endif
-  #include "raw_hid.h"
+#ifdef OLED_CONTROL_ENABLE
   #include "oledctrl.h"
   #include "via.h"
 #endif
@@ -28,7 +24,7 @@ enum custom_keycodes {
   LOWER,
   RAISE,
   ADJUST,
-#ifdef CONTROLLABLE_OLEDS
+#ifdef OLED_CONTROL_ENABLE
   // VIA-defined keycodes, which can be added to the keymap below, or mapped in VIA.
   SET_MASTER_TAG = USER00,
   INC_MASTER_TAG = USER01,
@@ -168,323 +164,23 @@ const char *read_logo(void);
 // void set_timelog(void);
 // const char *read_timelog(void);
 
-#ifdef CONTROLLABLE_OLEDS
-
-/*
- * Add support for controlling the content of the OLED screen(s) from the
- * operating system via raw HID.
- * Add "EXTRAFLAGS += -DCONTROLLABLE_OLEDS" to your rules.mk to build the
- * support needed to send commands from the operating system to the firmware.
- *
- * Data sent to and from the firmware contains a four-byte header, necessary to
- * bypass VIA if it is enabled, and to handle different commands and screens.
- * This header is necessary and needs to be correct for the commands to be
- * recognised and properly processed. The first two bytes should be 0x02 and
- * 0x00 respectively, used to bypass VIA.  The third byte is a command found in
- * oled_command_id, and the fourth byte is one of the screens in
- * oled_screen_id.
- * For example: 0x02 0x00 0x01 0x00 means that the master screen should be
- * cleared.
- *
- * Commands (sent to firmware):
- * - Byte 1: 0x02
- * - Byte 2: 0x00
- * - Byte 3: oled_command_id
- * - Byte 4: oled_screen_id
- * - Byte ...: Depends on command; see below.
- *
- * Commands should be sent with a short delay in between, e.g. 10 milliseconds,
- * especially when controlling the slave screen, or some commands might get
- * lost.
- *
- * For messages sent by the firmware, the first byte contains a result code in
- * oled_result_id, the second byte whether the message is a response to a
- * command or an event triggered by a keycode as oled_message_id, the third
- * byte is the command the response is for (oled_command_id), or the event
- * (oled_event_id). The following bytes depend on the type of the response or
- * event. For responses, generally the same thing is sent back as was passed
- * in. See the documentation below.
- *
- * Response (sent from firmware):
- * - Byte 1: oled_result_id
- * - Byte 2: 0x00
- * - Byte 3: oled_command_id
- * - Byte 4: oled_screen_id
- * - Byte ...: Depends on response; see below.
- *
- * Event (sent from firmware):
- * - Byte 1: 0x00
- * - Byte 2: 0x01
- * - Byte 3: oled_event_id
- * - Byte 4: oled_screen_id
- * - Byte ...: Depends on event; see below.
- *
- * Note: The raw HID protocol can only support frames of 32 bytes, and minus
- * the necessary header, it means that 28 characters are currently the maximum
- * number of characters that can be written per line. The SSD1306 OLED supports
- * 21 characters per line.
- */
-
-// Result codes for the commands.
-// First byte in messages from the firmware.
-enum oled_result_id {
-  id_success = 0x00,
-  id_failure = 0x01
-};
-
-// Type of a message sent from the firmware
-// Second byte in messages from the firmware.
-enum oled_message_id {
-  id_response = 0x00,
-  id_event = 0x01
-};
-
-/*
- * The commands that are recognised to control the OLEDs.
- * Third byte in messages to and from the firmware.
- * id_set_up:
- *   This is equivalent to clear, but also returns the number of characters
- *   that can be written to the screen in the fifth and sixth byte of the
- *   response (columns and rows, respectively).
- *
- * id_clear:
- *   Clear the entire screen. Depending on how oled_task_user() looks, this might
- *   revert the screen to its "default" (uncontrolled) state.
- *
- * id_set_line:
- *   Set the content of a line/row of the screen. The fifth byte should be which
- *   line to modify, and the sixth byte and onwards should be content that is
- *   desired on that line. Will replace everything on that line, and will not
- *   wrap to the next one.
- *
- * id_present:
- *   Show the changes to the screen. This has to be called after the desired
- *   number of id_set_line commands have been issued. Think of it as double
- *   buffering, where this command will switch the front and back buffer.
- */
-enum oled_command_id {
-  id_set_up = 0x00,
-  id_clear = 0x01,
-  id_set_line = 0x02,
-  id_present = 0x03
-};
-
-/*
- * The events that the firmware might send, triggered by certain keycodes
- * (see custom_keycodes above).
- * They are the third byte in messages sent from the firmware.
- * id_event_set_tag:
- *   A specific tag is requested to be shown on a specific screen. The fourth
- *   byte is the screen (oled_screen_id below), and the fifth is the tag ID.
- *   Note that KC_1 => tag ID 1.
- *
- * id_event_increment_tag:
- *   Go to the next tag for a specific screen. The fourth byte is the screen
- *   (oled_screen_id below).
- *
- * id_event_decrement_tag:
- *   Go to the previous tag for a specific screen. The fourth byte is the
- *   screen (oled_screen_id below).
- */
-enum oled_event_id {
-  id_event_set_tag = 0x00,
-  id_event_increment_tag = 0x01,
-  id_event_decrement_tag = 0x02
-};
-
-// Which OLED screen to control.
-// Typically the fourth byte in messages to and from the firmware.
-enum oled_screen_id {
-  id_master = 0x00,
-  id_slave  = 0x01
-};
-
-// The size of the screen buffer.
-#define SCREEN_BUFFER_LENGTH ((OLED_DISPLAY_WIDTH / OLED_FONT_WIDTH) * (OLED_DISPLAY_HEIGHT / OLED_FONT_HEIGHT))
-
-// The current text shown on the screen (front buffer).
-static char current_screen[SCREEN_BUFFER_LENGTH + 1] = {0};
-// The back buffer containing the text to show when presenting.
-static char screen_buffer[SCREEN_BUFFER_LENGTH + 1] = {0};
-// Whether the screen buffer contains variables.
-static bool screen_has_variable = false;
-
-// Handle raw HID messages.
-// The signature looks a bit different depending on whether VIA is enabled.
-#ifdef VIA_ENABLE
-void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
-#else
-void raw_hid_receive(uint8_t *data, uint8_t length) {
-#endif
-  if(!data || length < 2)
-    return;
-
-  // First two bytes in the header are sent for VIA compatibility, and used
-  // as the result code and message type for the response.
-  enum oled_result_id *result = &data[0];
-  *result = id_failure;
-  enum oled_message_id *message = &data[1];
-  *message = id_response;
-
-  if (length > 3) {
-    // The next two bytes are the command and screen, followed by any data.
-    uint8_t command_id = data[2];
-    enum oled_screen_id screen = data[3];
-    uint8_t *command_data = &data[4];
-    uint8_t command_length = length - 5;
-
-    if (screen == id_slave && is_keyboard_master()) {
-      // Command for the slave, send it over the serial.
-      oledctrl_send_msg(data, length);
-      *result = id_success;
-    }
-    else if (screen == id_master || (screen == id_slave && !is_keyboard_master())) {
-      switch (command_id) {
-        case id_set_up: // Return the size of the screen.
-          command_data[0] = oled_max_chars();
-          command_data[1] = oled_max_lines();
-          // Fall through
-        case id_clear: // Clear the buffers and screens
-          memset(current_screen, 0, sizeof(current_screen));
-          memset(screen_buffer, ' ', sizeof(screen_buffer));
-          oled_clear();
-          *result = id_success;
-          break;
-        case id_set_line: { // Set a line of text.
-          uint8_t line = command_data[0];
-          char *text = (char*)&command_data[1];
-          if (line >= oled_max_lines()) // Line out of bounds
-            break;
-
-          uint8_t len = MIN(strnlen(text, command_length), oled_max_chars());
-          memcpy(&screen_buffer[line * oled_max_chars()], text, len);
-          if (len < oled_max_chars()) {
-            // Erase everything else until the end of the line.
-            memset(&screen_buffer[line * oled_max_chars() + len], ' ', oled_max_chars() - len);
-          }
-          *result = id_success;
-          break;
-        }
-        case id_present: // Copy the content of the back buffer to the front buffer.
-          memcpy(current_screen, screen_buffer, SCREEN_BUFFER_LENGTH);
-          current_screen[sizeof(current_screen) - 1] = 0;
-          *result = id_success;
-          screen_has_variable = strchr(current_screen, '%');
-          break;
-      }
-    }
-  }
-
-  if (!is_keyboard_master())
-    return; // Slave cannot answer to HID messages
-
-#ifndef VIA_ENABLE
-  // VIA module will always do this, so might as well replicate it here.
-  raw_hid_send(data, length);
-#endif
-}
-
-// Process any message from the master.
-void oledctrl_receive_msg(uint8_t *msg, uint8_t len) {
-#ifdef VIA_ENABLE
-  raw_hid_receive_kb(msg, len);
-#else
-  raw_hid_receive(msg, len);
-#endif
-}
+#ifdef OLED_CONTROL_ENABLE
 
 // Byte to keep track of two-step tag selection on a certain screen.
 static uint8_t processing_screen_command = 0xFF;
-// Buffer used when sending HID events.
-static uint8_t hid_event_buffer[32] = {0};
-// Send an event over HID raw.
-static void send_hid_event(uint8_t event, uint8_t *args, uint8_t len) {
-  hid_event_buffer[0] = id_success;
-  hid_event_buffer[1] = id_event;
-  hid_event_buffer[2] = event;
-  memcpy(&hid_event_buffer[3], args, MIN(len, sizeof(hid_event_buffer) - 4));
-  raw_hid_send(hid_event_buffer, sizeof(hid_event_buffer));
-}
 
-// Buffer for substituting variables with text.
-static char var_buffer[OLED_DISPLAY_WIDTH / OLED_FONT_WIDTH];
-/**
- * Write the front buffer to the OLED screen.
- * This method supports some simple substitutions of variables inside the
- * lines. For example, "My current layer: %l" will replace "%l" with the name
- * of the current layer. Note that if the line becomes too long for it to fit
- * on the screen, text will be cut off at the end.
- *
- * Current handled variables:
- *   %l  -  The layer name
- */
-static void write_screen(void) {
-  if (!screen_has_variable) {
-    oled_write(current_screen, false);
-  } else {
-    // A bit convoluted, but it works.
-    for (int row = 0; row < oled_max_lines(); ++row) {
-      for (int col = 0, i = row * oled_max_chars(); col < oled_max_chars(); ++col, ++i) {
-        // Don't write the final null character, or the first line will disappear.
-        if (current_screen[i] == 0) {
-          break;
-        } else if (current_screen[i] == '%' && i + 1 < sizeof(current_screen)) {
-          int len = 0;
-          switch(current_screen[i+1]) {
-            case 'l': {
-              switch (get_highest_layer(layer_state)) {
-                case _QWERTY:
-                  len = snprintf(var_buffer, sizeof(var_buffer), "Default");
-                  break;
-                case _LOWER:
-                  len = snprintf(var_buffer, sizeof(var_buffer), "Lower");
-                  break;
-                case _RAISE:
-                  len = snprintf(var_buffer, sizeof(var_buffer), "Raise");
-                  break;
-                case _ADJUST:
-                  len = snprintf(var_buffer, sizeof(var_buffer), "Adjust");
-                  break;
-                default:
-                  len = snprintf(var_buffer, sizeof(var_buffer), "Undef-%ld", layer_state);
-                  break;
-              }
-              break;
-            }
-            /* Add other substitutions here. */
-          }
-
-          if (len > 0) {
-            // A substitution occurred. The content of the var_buffer will
-            // either be printed in full, or until the end of the line.
-            len = MIN(MIN(len, oled_max_chars() - col), sizeof(var_buffer) - 1);
-            var_buffer[len] = 0; // Chop if off if necessary.
-            oled_write(var_buffer, false);
-            col += len - 1; // Will be incremented once more by the loop.
-            ++i; // Skip the variable character.
-            continue;
-          }
-        }
-
-        // Write the character normally to the screen.
-        oled_write_char(current_screen[i], false);
-      }
-    }
-  }
-}
-
-#endif // CONTROLLABLE_OLEDS
+#endif // OLED_CONTROL_ENABLE
 
 void oled_task_user(void) {
+#ifdef OLED_CONTROL_ENABLE
+  // If the screen has been filled by the operating system, then use that,
+  // otherwise revert to the default.
+  if (oledctrl_draw()) {
+    return;
+  }
+#endif // OLED_CONTROL_ENABLE
+
   if (is_keyboard_master()) {
-#ifdef CONTROLLABLE_OLEDS
-    // If the screen has been filled by the operating system, then use that,
-    // otherwise revert to the default.
-    if (current_screen[0] != 0) {
-      write_screen();
-      return;
-    }
-#endif // CONTROLLABLE_OLEDS
     // If you want to change the display of OLED, you need to change here
     oled_write_ln(read_layer_state(), false);
     //oled_write_ln(read_keylog(), false);
@@ -493,14 +189,6 @@ void oled_task_user(void) {
     //oled_write_ln(read_host_led_state(), false);
     //oled_write_ln(read_timelog(), false);
   } else {
-#ifdef CONTROLLABLE_OLEDS
-    // If the screen has been filled by the operating system, then use that,
-    // otherwise revert to the default.
-    if (current_screen[0] != 0) {
-      write_screen();
-      return;
-    }
-#endif
     oled_write(read_logo(), false);
   }
 }
@@ -549,7 +237,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         }
         return false;
         break;
-#ifdef CONTROLLABLE_OLEDS
+#ifdef OLED_CONTROL_ENABLE
     // Two-step tag selection. First part is to invoke the selection keycode.
     case SET_MASTER_TAG:
     case SET_SLAVE_TAG:
@@ -564,14 +252,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         if (record->event.pressed) {
           uint8_t screen = (keycode == INC_MASTER_TAG || keycode == DEC_MASTER_TAG) ? id_master : id_slave;
           uint8_t event = (keycode == INC_MASTER_TAG || keycode == INC_SLAVE_TAG) ? id_event_increment_tag : id_event_decrement_tag;
-          send_hid_event(event, &screen, 1);
+          oledctrl_send_event(event, &screen, 1);
         }
         return false;
         break;
 #endif
   }
 
-#ifdef CONTROLLABLE_OLEDS
+#ifdef OLED_CONTROL_ENABLE
   // Two-step tag selection. Second part is to get a numerical button press.
   // The number will not be printed out. If a non-numerical button is pressed,
   // it will be printed out and the tag selection will stop.
@@ -590,7 +278,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     }
     if (tag != 0xFF) {
       uint8_t args[] = { screen, tag };
-      send_hid_event(id_event_set_tag, args, sizeof(args));
+      oledctrl_send_event(id_event_set_tag, args, sizeof(args));
       return false;
     }
   }

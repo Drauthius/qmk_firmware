@@ -455,7 +455,7 @@ ifeq ($(strip $(OLED_DRIVER_ENABLE)), yes)
     SRC += oled_driver.c
 
     ifeq ($(strip $(OLED_CONTROL_ENABLE)), yes)
-        OPT_DEFS += -DCONTROLLABLE_OLEDS
+        OPT_DEFS += -DOLED_CONTROL_ENABLE
         SRC += oledctrl.c
     endif
 endif

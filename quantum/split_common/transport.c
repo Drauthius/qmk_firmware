@@ -21,7 +21,7 @@ static pin_t encoders_pad[] = ENCODERS_PAD_A;
 #    define NUMBER_OF_ENCODERS (sizeof(encoders_pad) / sizeof(pin_t))
 #endif
 
-#ifdef CONTROLLABLE_OLEDS
+#if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
 #    include "oledctrl.h"
 #endif
 
@@ -42,7 +42,7 @@ typedef struct _I2C_slave_buffer_t {
 #    ifdef WPM_ENABLE
     uint8_t current_wpm;
 #    endif
-#    ifdef CONTROLLABLE_OLEDS
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     oledctrl_syncinfo_t oledctrl_sync;
 #    endif
 } I2C_slave_buffer_t;
@@ -100,7 +100,7 @@ bool transport_master(matrix_row_t matrix[]) {
     }
 #    endif
 
-#    ifdef CONTROLLABLE_OLEDS
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (oledctrl_is_msg_pending()) {
         oledctrl_syncinfo_t oledctrl_sync;
         oledctrl_get_syncinfo(&oledctrl_sync);
@@ -137,7 +137,7 @@ void transport_slave(matrix_row_t matrix[]) {
     set_current_wpm(i2c_buffer->current_wpm);
 #    endif
 
-#    ifdef CONTROLLABLE_OLEDS
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (i2c_buffer->oledctrl_sync[0] != 0) {
         oledctrl_update_sync(&i2c_buffer->oledctrl_sync);
         i2c_buffer->oledctrl_sync[0] = 0;
@@ -189,7 +189,7 @@ volatile Serial_rgblight_t serial_rgblight = {};
 uint8_t volatile status_rgblight           = 0;
 #    endif
 
-#    if defined(CONTROLLABLE_OLEDS)
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
 typedef struct _Serial_oledctrl_t {
     oledctrl_syncinfo_t oledctrl_sync;
 } Serial_oledctrl_t;
@@ -207,7 +207,7 @@ enum serial_transaction_id {
 #    if defined(RGBLIGHT_ENABLE) && defined(RGBLIGHT_SPLIT)
     PUT_RGBLIGHT,
 #    endif
-#    if defined(CONTROLLABLE_OLEDS)
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     PUT_OLEDCTRL,
 #    endif
 };
@@ -227,7 +227,7 @@ SSTD_t transactions[] = {
             (uint8_t *)&status_rgblight, sizeof(serial_rgblight), (uint8_t *)&serial_rgblight, 0, NULL  // no slave to master transfer
         },
 #    endif
-#    if defined(CONTROLLABLE_OLEDS)
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     [PUT_OLEDCTRL] =
         {
             (uint8_t *)&status_oledctrl, sizeof(serial_oledctrl), (uint8_t *)&serial_oledctrl, 0, NULL  // no slave to master transfer
@@ -295,7 +295,7 @@ bool transport_master(matrix_row_t matrix[]) {
     serial_m2s_buffer.current_wpm = get_current_wpm();
 #    endif
 
-#    ifdef CONTROLLABLE_OLEDS
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (oledctrl_is_msg_pending()) {
       oledctrl_get_syncinfo((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
       if (soft_serial_transaction(PUT_OLEDCTRL) == TRANSACTION_END)
@@ -323,7 +323,7 @@ void transport_slave(matrix_row_t matrix[]) {
     set_current_wpm(serial_m2s_buffer.current_wpm);
 #    endif
 
-#    ifdef CONTROLLABLE_OLEDS
+#    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (status_oledctrl == TRANSACTION_ACCEPTED) {
       oledctrl_update_sync((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
       status_oledctrl = TRANSACTION_END;
