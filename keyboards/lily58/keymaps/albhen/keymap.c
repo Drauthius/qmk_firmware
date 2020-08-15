@@ -164,13 +164,6 @@ const char *read_logo(void);
 // void set_timelog(void);
 // const char *read_timelog(void);
 
-#ifdef OLED_CONTROL_ENABLE
-
-// Byte to keep track of two-step tag selection on a certain screen.
-static uint8_t processing_screen_command = 0xFF;
-
-#endif // OLED_CONTROL_ENABLE
-
 void oled_task_user(void) {
 #ifdef OLED_CONTROL_ENABLE
   // If the screen has been filled by the operating system, then use that,
@@ -195,12 +188,17 @@ void oled_task_user(void) {
 #endif // OLED_DRIVER_ENABLE
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
-  if (record->event.pressed) {
-#ifdef OLED_DRIVER_ENABLE
+  //if (record->event.pressed) {
+//#ifdef OLED_DRIVER_ENABLE
     //set_keylog(keycode, record);
-#endif
+//#endif
     // set_timelog();
-  }
+  //}
+
+#ifdef OLED_CONTROL_ENABLE
+  // Byte to keep track of two-step tag selection on a certain screen.
+  static uint8_t processing_screen_command = 0xFF;
+#endif // OLED_CONTROL_ENABLE
 
   switch (keycode) {
     case QWERTY:
@@ -241,7 +239,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     // Two-step tag selection. First part is to invoke the selection keycode.
     case SET_MASTER_TAG:
     case SET_SLAVE_TAG:
-        processing_screen_command = (keycode == SET_MASTER_TAG) ? id_master : id_slave;
+        processing_screen_command = (keycode == SET_MASTER_TAG) ? OLEDCTRL_SCR_MASTER : OLEDCTRL_SCR_SLAVE;
         return false;
         break;
     // Keys to increase or decrease the tag on a certain screen.
@@ -250,8 +248,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     case INC_SLAVE_TAG:
     case DEC_SLAVE_TAG:
         if (record->event.pressed) {
-          uint8_t screen = (keycode == INC_MASTER_TAG || keycode == DEC_MASTER_TAG) ? id_master : id_slave;
-          uint8_t event = (keycode == INC_MASTER_TAG || keycode == INC_SLAVE_TAG) ? id_event_increment_tag : id_event_decrement_tag;
+          enum oledctrl_event_id event =
+            (keycode == INC_MASTER_TAG || keycode == INC_SLAVE_TAG) ?
+              OLEDCTRL_EVENT_INCREMENT_TAG :
+              OLEDCTRL_EVENT_DECREMENT_TAG;
+          enum oledctrl_screen_id screen =
+            (keycode == INC_MASTER_TAG || keycode == DEC_MASTER_TAG) ?
+              OLEDCTRL_SCR_MASTER :
+              OLEDCTRL_SCR_SLAVE;
           oledctrl_send_event(event, &screen, 1);
         }
         return false;
@@ -278,7 +282,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     }
     if (tag != 0xFF) {
       uint8_t args[] = { screen, tag };
-      oledctrl_send_event(id_event_set_tag, args, sizeof(args));
+      oledctrl_send_event(OLEDCTRL_EVENT_SET_TAG, args, sizeof(args));
       return false;
     }
   }

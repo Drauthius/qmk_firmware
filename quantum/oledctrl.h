@@ -1,4 +1,4 @@
-/* Copyright 2020 Albert Diserholt
+/* Copyright 2020 Albert Diserholt (Drauthius)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,147 +17,139 @@
 #pragma once
 
 /*
- * Add support for controlling the content of the OLED screen(s) from the
- * operating system via raw HID.
- * Add "OLED_CONTROL_ENABLE=yes" to your rules.mk to build the
- * support needed to send commands from the operating system to the firmware.
- * Add "#define OLEDCTRL_SPLIT" to config.h to build in support for controlling
- * the slave side via the master.
+ * This module adds support for controlling the content of the OLED
+ * screen(s) from the operating system via raw HID.
+ * Add "OLED_CONTROL_ENABLE=yes" to your rules.mk to build the support
+ * needed to send commands from the operating system to the firmware.
+ * Add "#define OLEDCTRL_SPLIT" to config.h to build in support for
+ * controlling the slave side via the master.
  *
- * Data sent to and from the firmware contains a four-byte header, necessary to
+ * Data sent to and from the firmware contains a three-byte header, necessary to
  * bypass VIA if it is enabled, and to handle different commands and screens.
- * This header is necessary and needs to be correct for the commands to be
- * recognised and properly processed. The first two bytes should be 0x02 and
- * 0x00 respectively, used to bypass VIA.  The third byte is a command found in
- * oled_command_id, and the fourth byte is one of the screens in
- * oled_screen_id.
- * For example: 0x02 0x00 0x01 0x00 means that the master screen should be
- * cleared.
  *
  * Commands (sent to firmware):
- * - Byte 1: 0x02
- * - Byte 2: 0x00
- * - Byte 3: oled_command_id
- * - Byte 4: oled_screen_id
+ * - Byte 1: OLEDCTRL_MSG_COMMAND
+ * - Byte 2: oledctrl_command_id
+ * - Byte 3: oledctrl_screen_id
  * - Byte ...: Depends on command; see below.
  *
  * Commands should be sent with a short delay in between, e.g. 10 milliseconds,
  * especially when controlling the slave screen, or some commands might get
  * lost.
  *
- * For messages sent by the firmware, the first byte contains a result code in
- * oled_result_id, the second byte whether the message is a response to a
- * command or an event triggered by a keycode as oled_message_id, the third
- * byte is the command the response is for (oled_command_id), or the event
- * (oled_event_id). The following bytes depend on the type of the response or
- * event. For responses, generally the same thing is sent back as was passed
+ * For messages sent by the firmware, the first byte contains either a result code
+ * from oledctrl_result_id, or the value OLEDCTRL_MSG_EVENT. Events can be
+ * generated in keyboard-level code by calling oledctrl_send_event().
+ * For responses, generally the same thing is sent back as was passed
  * in. See the documentation below.
  *
- * Response (sent from firmware):
- * - Byte 1: oled_result_id
- * - Byte 2: 0x00
- * - Byte 3: oled_command_id
- * - Byte 4: oled_screen_id
+ * Responses (sent from firmware):
+ * - Byte 1: oledctrl_result_id
  * - Byte ...: Depends on response; see below.
  *
- * Event (sent from firmware):
- * - Byte 1: 0x00
- * - Byte 2: 0x01
- * - Byte 3: oled_event_id
- * - Byte 4: oled_screen_id
+ * Events (sent from keyboard-level code):
+ * - Byte 1: OLEDCTRL_MSG_EVENT
+ * - Byte 2: oledctrl_event_id
+ * - Byte 3: oledctrl_screen_id
  * - Byte ...: Depends on event; see below.
- *
- * Note: The raw HID protocol can only support frames of 32 bytes, and minus
- * the necessary header, it means that 28 characters are currently the maximum
- * number of characters that can be written per line. The SSD1306 OLED supports
- * 21 characters per line.
  */
 
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "usb_descriptor.h" // For RAW_EPSIZE
+
+// Maximum length of a HID message
 #ifndef OLEDCTRL_MSG_MAX_LEN
-#    define OLEDCTRL_MSG_MAX_LEN 32
+#    define OLEDCTRL_MSG_MAX_LEN RAW_EPSIZE
 #endif
 
-// Result codes for the commands.
-// First byte in messages from the firmware.
-enum oledctrl_result_id {
-    id_success = 0x00,
-    id_failure = 0x01
+// The type of a message understood by the OLED controlling code.
+// The IDs must not clash with VIA.
+enum oledctrl_message_id {
+    OLEDCTRL_MSG_FIRST    = 0xC0,
+    OLEDCTRL_MSG_COMMAND  = OLEDCTRL_MSG_FIRST,
+    OLEDCTRL_MSG_EVENT    = 0xC1,
+    OLEDCTRL_MSG_LAST
 };
 
-// Type of a message sent from the firmware
-// Second byte in messages from the firmware.
-enum oledctrl_message_id {
-    id_response = 0x00,
-    id_event = 0x01
+// Result codes for the commands.
+// First byte in responses from the firmware.
+enum oledctrl_result_id {
+    OLEDCTRL_RES_SUCCESS = 0x00,
+    OLEDCTRL_RES_FAILURE = 0x01
 };
 
 /*
  * The commands that are recognised to control the OLEDs.
- * Third byte in messages to and from the firmware.
- * id_set_up:
+ * Second byte in messages to and from the firmware.
+ * OLEDCTRL_CMD_SET_UP:
  *   This is equivalent to clear, but also returns the number of characters
- *   that can be written to the screen in the fifth and sixth byte of the
+ *   that can be written to the screen in the fourth and fifth bytes of the
  *   response (columns and rows, respectively).
  *
- * id_clear:
+ * OLEDCTRL_CMD_CLEAR:
  *   Clear the entire screen. Depending on how oled_task_user() looks, this might
  *   revert the screen to its "default" (uncontrolled) state.
  *
- * id_set_line:
- *   Set the content of a line/row of the screen. The fifth byte should be which
- *   line to modify, and the sixth byte and onwards should be content that is
+ * OLEDCTRL_CMD_SET_LINE:
+ *   Set the content of a line (row) of the screen. The fourth byte should be which
+ *   line to modify, and the fifth byte and onwards should be content that is
  *   desired on that line. Will replace everything on that line, and will not
  *   wrap to the next one.
  *
- * id_present:
+ * OLEDCTRL_CMD_SET_CHARS:
+ *   Set a portion of the screen. The fourth byte should be the offset, the fifth byte
+ *   the length of the string, and the sixth byte and onwards should be the string to
+ *   set. Will replace only until the length, and will wrap if it goes over a line.
+ *
+ * OLEDCTRL_CMD_PRESENT:
  *   Show the changes to the screen. This has to be called after the desired
- *   number of id_set_line commands have been issued. Think of it as double
- *   buffering, where this command will switch the front and back buffer.
+ *   number of OLEDCTRL_CMD_SET_LINE commands have been issued. Think of it as double
+ *   buffering, where this command will present the content of the back buffer.
  */
 enum oledctrl_command_id {
-    id_set_up = 0x00,
-    id_clear = 0x01,
-    id_set_line = 0x02,
-    id_present = 0x03
+    OLEDCTRL_CMD_SET_UP    = 0x00,
+    OLEDCTRL_CMD_CLEAR     = 0x01,
+    OLEDCTRL_CMD_SET_LINE  = 0x02,
+    OLEDCTRL_CMD_SET_CHARS = 0x03,
+    OLEDCTRL_CMD_PRESENT   = 0x04
 };
 
 /*
- * The events that the firmware might send, triggered by certain keycodes
- * (see custom_keycodes above).
- * They are the third byte in messages sent from the firmware.
- * id_event_set_tag:
- *   A specific tag is requested to be shown on a specific screen. The fourth
- *   byte is the screen (oled_screen_id below), and the fifth is the tag ID.
+ * The events that the firmware might send, triggered by keyboard-level code.
+ * They are the second byte in messages sent from the firmware.
+ * OLEDCTRL_EVENT_SET_TAG:
+ *   A specific tag is requested to be shown on a specific screen. The thrid
+ *   byte is the screen (oledctrl_screen_id below), and the fourth is the tag ID.
  *   Note that KC_1 => tag ID 1.
  *
- * id_event_increment_tag:
- *   Go to the next tag for a specific screen. The fourth byte is the screen
- *   (oled_screen_id below).
+ * OLEDCTRL_EVENT_INCREMENT_TAG:
+ *   Go to the next tag for a specific screen. The third byte is the screen
+ *   (oledctrl_screen_id below).
  *
- * id_event_decrement_tag:
- *   Go to the previous tag for a specific screen. The fourth byte is the
- *   screen (oled_screen_id below).
+ * OLEDCTRL_EVENT_DECREMENT_TAG:
+ *   Go to the previous tag for a specific screen. The third byte is the
+ *   screen (oledctrl_screen_id below).
  */
 enum oledctrl_event_id {
-    id_event_set_tag = 0x00,
-    id_event_increment_tag = 0x01,
-    id_event_decrement_tag = 0x02
+    OLEDCTRL_EVENT_SET_TAG       = 0x00,
+    OLEDCTRL_EVENT_INCREMENT_TAG = 0x01,
+    OLEDCTRL_EVENT_DECREMENT_TAG = 0x02
 };
 
 // Which OLED screen to control.
-// Typically the fourth byte in messages to and from the firmware.
+// Typically the third byte in messages to and from the firmware.
 enum oledctrl_screen_id {
-    id_master = 0x00,
-    id_slave  = 0x01
+    OLEDCTRL_SCR_MASTER = 0x00,
+    OLEDCTRL_SCR_SLAVE  = 0x01
 };
 
 bool oledctrl_has_content(void);
 bool oledctrl_draw(void);
 
-void oledctrl_send_event(uint8_t event, uint8_t *args, uint8_t args_len);
+void oledctrl_handle_cmd(uint8_t *data, uint8_t length);
+void oledctrl_send_event(enum oledctrl_event_id event, uint8_t *args, uint8_t args_len);
 
 #ifdef OLEDCTRL_SPLIT
 
