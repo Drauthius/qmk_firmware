@@ -30,6 +30,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #undef OLED_FONT_H
 #define OLED_FONT_H "keyboards/lily58/keymaps/albhen/glcdfont.c"
+#undef OLED_TIMEOUT
+#define OLED_TIMEOUT 0
 #define OLEDCTRL_SPLIT
 
 #define USE_SERIAL_PD2

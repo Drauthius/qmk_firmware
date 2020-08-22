@@ -172,6 +172,7 @@ void oledctrl_handle_cmd(uint8_t *data, uint8_t length) {
                 memset(front_buffer, 0, sizeof(front_buffer));
                 memset(back_buffer, ' ', sizeof(back_buffer));
                 oled_clear();
+                oled_interpret_newline(command == OLEDCTRL_CMD_CLEAR); // Let userspace use all the characters in the font.
                 *result = OLEDCTRL_RES_SUCCESS;
                 break;
             case OLEDCTRL_CMD_SET_LINE: { // Set a line of text.
