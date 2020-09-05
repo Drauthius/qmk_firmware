@@ -1,7 +1,7 @@
 {
   "name": "lily58",
-  "vendorId": "0xFC51",
-  "productId": "0x0058",
+  "vendorId": "0x04D8",
+  "productId": "0xEB2D",
   "lighting": "qmk_rgblight",
   "matrix": {"rows": 10, "cols": 6},
   "layouts": {
