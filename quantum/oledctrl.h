@@ -21,37 +21,8 @@
  * screen(s) from the operating system via raw HID.
  * Add "OLED_CONTROL_ENABLE=yes" to your rules.mk to build the support
  * needed to send commands from the operating system to the firmware.
- * Add "#define OLEDCTRL_SPLIT" to config.h to build in support for
- * controlling the slave side via the master.
  *
- * Data sent to and from the firmware contains a three-byte header, necessary to
- * bypass VIA if it is enabled, and to handle different commands and screens.
- *
- * Commands (sent to firmware):
- * - Byte 1: OLEDCTRL_MSG_COMMAND
- * - Byte 2: oledctrl_command_id
- * - Byte 3: oledctrl_screen_id
- * - Byte ...: Depends on command; see below.
- *
- * Commands should be sent with a short delay in between, e.g. 10 milliseconds,
- * especially when controlling the slave screen, or some commands might get
- * lost.
- *
- * For messages sent by the firmware, the first byte contains either a result code
- * from oledctrl_result_id, or the value OLEDCTRL_MSG_EVENT. Events can be
- * generated in keyboard-level code by calling oledctrl_send_event().
- * For responses, generally the same thing is sent back as was passed
- * in. See the documentation below.
- *
- * Responses (sent from firmware):
- * - Byte 1: oledctrl_result_id
- * - Byte ...: Depends on response; see below.
- *
- * Events (sent from keyboard-level code):
- * - Byte 1: OLEDCTRL_MSG_EVENT
- * - Byte 2: oledctrl_event_id
- * - Byte 3: oledctrl_screen_id
- * - Byte ...: Depends on event; see below.
+ * See docs/feature_oledctrl.md for more information about the protocol.
  */
 
 #include <stdint.h>
@@ -82,7 +53,6 @@ enum oledctrl_result_id {
 
 /*
  * The commands that are recognised to control the OLEDs.
- * Second byte in messages to and from the firmware.
  * OLEDCTRL_CMD_SET_UP:
  *   This is equivalent to clear, but also returns the number of characters
  *   that can be written to the screen in the fourth and fifth bytes of the
@@ -120,7 +90,7 @@ enum oledctrl_command_id {
  * The events that the firmware might send, triggered by keyboard-level code.
  * They are the second byte in messages sent from the firmware.
  * OLEDCTRL_EVENT_SET_TAG:
- *   A specific tag is requested to be shown on a specific screen. The thrid
+ *   A specific tag is requested to be shown on a specific screen. The third
  *   byte is the screen (oledctrl_screen_id below), and the fourth is the tag ID.
  *   Note that KC_1 => tag ID 1.
  *
