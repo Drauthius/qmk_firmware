@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // #define MASTER_RIGHT
 // #define EE_HANDS
 
+// #define SSD1306OLED
 #undef OLED_FONT_H
 #define OLED_FONT_H "keyboards/lily58/keymaps/albhen/glcdfont.c"
 #undef OLED_TIMEOUT

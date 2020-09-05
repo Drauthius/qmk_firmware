@@ -18,9 +18,8 @@ SWAP_HANDS_ENABLE = no      # Enable one-hand typing
 OLED_DRIVER_ENABLE= yes     # OLED display
 
 VIA_ENABLE = yes            # Enable VIA support
-OLED_CONTROL_ENABLE=yes     # Enable controlling the OLEDs from the OS
-
-LINK_TIME_OPTIMIZATION_ENABLE = yes  # Reduce size of firmware by optimizing at link time
+OLED_CONTROL_ENABLE = yes   # Enable controlling the OLEDs from the OS
+LTO_ENABLE = yes            # Reduce size of firmware by optimizing at link time
 
 # Do not enable SLEEP_LED_ENABLE. it uses the same timer as BACKLIGHT_ENABLE
 SLEEP_LED_ENABLE = no    # Breathing sleep LED during USB suspend
