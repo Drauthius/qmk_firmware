@@ -297,9 +297,10 @@ bool transport_master(matrix_row_t matrix[]) {
 
 #    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (oledctrl_is_msg_pending()) {
-      oledctrl_get_syncinfo((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
-      if (soft_serial_transaction(PUT_OLEDCTRL) == TRANSACTION_END)
-        oledctrl_clear_msg_pending();
+        oledctrl_get_syncinfo((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
+        if (soft_serial_transaction(PUT_OLEDCTRL) == TRANSACTION_END) {
+            oledctrl_clear_msg_pending();
+        }
     }
 #    endif
     return true;
@@ -325,8 +326,8 @@ void transport_slave(matrix_row_t matrix[]) {
 
 #    if defined(OLED_CONTROL_ENABLE) && defined(OLEDCTRL_SPLIT)
     if (status_oledctrl == TRANSACTION_ACCEPTED) {
-      oledctrl_update_sync((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
-      status_oledctrl = TRANSACTION_END;
+        oledctrl_update_sync((oledctrl_syncinfo_t *)&serial_oledctrl.oledctrl_sync);
+        status_oledctrl = TRANSACTION_END;
     }
 #    endif
 }

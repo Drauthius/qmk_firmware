@@ -41,14 +41,14 @@ enum oledctrl_message_id {
     OLEDCTRL_MSG_FIRST    = 0xC0,
     OLEDCTRL_MSG_COMMAND  = OLEDCTRL_MSG_FIRST,
     OLEDCTRL_MSG_EVENT    = 0xC1,
-    OLEDCTRL_MSG_LAST
+    OLEDCTRL_MSG_LAST,
 };
 
 // Result codes for the commands.
 // First byte in responses from the firmware.
 enum oledctrl_result_id {
     OLEDCTRL_RES_SUCCESS = 0x00,
-    OLEDCTRL_RES_FAILURE = 0x01
+    OLEDCTRL_RES_FAILURE = 0x01,
 };
 
 /*
@@ -83,7 +83,7 @@ enum oledctrl_command_id {
     OLEDCTRL_CMD_CLEAR     = 0x01,
     OLEDCTRL_CMD_SET_LINE  = 0x02,
     OLEDCTRL_CMD_SET_CHARS = 0x03,
-    OLEDCTRL_CMD_PRESENT   = 0x04
+    OLEDCTRL_CMD_PRESENT   = 0x04,
 };
 
 /*
@@ -105,14 +105,14 @@ enum oledctrl_command_id {
 enum oledctrl_event_id {
     OLEDCTRL_EVENT_SET_TAG       = 0x00,
     OLEDCTRL_EVENT_INCREMENT_TAG = 0x01,
-    OLEDCTRL_EVENT_DECREMENT_TAG = 0x02
+    OLEDCTRL_EVENT_DECREMENT_TAG = 0x02,
 };
 
 // Which OLED screen to control.
 // Typically the third byte in messages to and from the firmware.
 enum oledctrl_screen_id {
     OLEDCTRL_SCR_MASTER = 0x00,
-    OLEDCTRL_SCR_SLAVE  = 0x01
+    OLEDCTRL_SCR_SLAVE  = 0x01,
 };
 
 bool oledctrl_has_content(void);

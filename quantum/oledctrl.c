@@ -93,7 +93,7 @@ bool oledctrl_draw(void) {
                 break;
             } else if (front_buffer[i] == '%' && i + 1 < sizeof(front_buffer)) {
                 int len = 0;
-                switch(front_buffer[i+1]) {
+                switch (front_buffer[i+1]) {
                     case 'l': {
                         len = snprintf(var_buffer, sizeof(var_buffer), read_layer_state());
                         break;
@@ -249,8 +249,9 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 
     // VIA code will take care of responding if enabled.
 #   ifndef VIA_ENABLE
-    if (!is_keyboard_master())
+    if (!is_keyboard_master()) {
         return; // Slave cannot answer to HID messages
+    }
 
     // Return the same buffer, presumably with values changed.
     raw_hid_send(data, length);
